@@ -54,28 +54,59 @@ fn layout_text<'a>(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Use Mesa framework for rendering
     std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
 
+    // Embed the font file into the binary
     let font_data = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
-    let font = Font::try_from_bytes(font_data as &[u8]).unwrap();
+    // Load he font into memory
+    let font = Font::try_from_bytes(font_data as &[u8]).expect("Failed to load font");
 
-    let event_loop = EventLoop::new();
+    // This is an OS window, abstracted by the winit library to give us windows across different
+    // OSes
     let window = WindowBuilder::new().with_title("CrusTTY");
-    let context = ContextBuilder::new().with_vsync(true);
-    let display = Display::new(window, context, &event_loop)?;
+    // This is used to interact with the OS window and respond to different events, again from the
+    // winit library
+    let event_loop = EventLoop::new();
 
+    // OpenGL context is used to issue rendering commands to the GPU
+    let context = ContextBuilder::new().with_vsync(true);
+
+    // Higher-level abstraction of a combination of an OS window and OpenGL context
+    let display = Display::new(window, context, &event_loop).expect("Failed to initialize display");
+
+    // The string literal &str "Hello, World!" can not grow, so we need to convert it to String.
+    // String is heap-allocated, and can grow.
+    // Rust is smart enough to tell that .into() should return a String because of the type
+    // annotation.
+    // &str implements the Into<String> trait, that's why all of this is possible.
     let text: String = "Hello, World!".into();
 
+    // Access the window's scale factor, this is used to have everything scaled correctly on
+    // different screen DPIs
     let scale = display.gl_window().window().scale_factor();
 
+    // The base size of the font cache is 512x512, but we need to take the scale factor into
+    // account
     let (cache_width, cache_height) = ((512.0 * scale) as u32, (512.0 * scale) as u32);
+    // The font cache is used for storing pre-rasterized glyphs, which can improve font rendering
+    // performance
+    // Glyphs are a typography and font rendering concept. They are a visual representation of a
+    // character in a specific font and style.
+    // Rasterization means that the glyph data is converted from vectors into a pixel grid that is
+    // used to display the letters on the screen.
+    // rusttype handles this for us, and OpenGL actually displays the pixels on the screen.
     let mut cache: Cache<'static> = Cache::builder()
         .dimensions(cache_width, cache_height)
         .build();
 
+    // program! is a macro that is used to simplify creating OpenGL shader programs in GLSL (OpenGL
+    // Shading Language)
     let program = program!(
     &display,
+    // 140 is GLSL 1.40, which corresponds to OpenGL version 3.1
     140 => {
+            // Source code for a vertex shader
             vertex: "
                 #version 140
 
@@ -92,44 +123,65 @@ fn main() -> Result<(), Box<dyn Error>> {
                     v_colour = colour;
                 }
             ",
-
+            // Source code for a fragment shader
             fragment: "
                 #version 140
+
                 uniform sampler2D tex;
+
                 in vec2 v_tex_coords;
                 in vec4 v_colour;
+
                 out vec4 f_colour;
 
                 void main() {
                     f_colour = v_colour * vec4(1.0, 1.0, 1.0, texture(tex, v_tex_coords).r);
                 }
             "
-    })?;
+    })
+    .expect("Failed to compile GLSL shaders");
+
+    // Create a texture for storing the pre-rasterized glyphs
     let cache_tex = glium::texture::Texture2d::with_format(
+        // The display contains the OpenGL context which is necessary to create the texture
         &display,
+        // This struct represents a 2D image that is used to store the texture
         glium::texture::RawImage2d {
+            // Create a vector with the value 128 for each pixel (grayscale texture).
+            // Then we use the borrow checker to own the data. This means that it can be
+            // manipulated by glium without it having to worry about the original source.
+            // TODO: Learn more about borrow checker
             data: Cow::Owned(vec![128u8; cache_width as usize * cache_height as usize]),
             width: cache_width,
             height: cache_height,
+            // Each pixel is an unsigned byte (8 bits)
             format: glium::texture::ClientFormat::U8,
         },
+        // Indicates that the texture should be stored as 8-bit integers
         glium::texture::UncompressedFloatFormat::U8,
+        // Don't generate mipmaps, because we won't be rendering the fonts at different scales or
+        // resolutions.
         glium::texture::MipmapsOption::NoMipmap,
-    )?;
+    )
+    .expect("Failed to create the glyph texture");
 
+    // Automatically implement the Copy and Clone traits
     #[derive(Copy, Clone)]
+    // Vertex struct that holds the position of the vertex and its texture
     struct Vertex {
+        // Store x and y (2 elements) as a float
         position: [f32; 2],
         tex_coords: [f32; 2],
     }
 
+    // Implement the necessary traits and functions into the Vertex struct, so it can be used in
+    // OpenGL
     implement_vertex!(Vertex, position, tex_coords);
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
         match event {
-            Event::LoopDestroyed => (),
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => (),
