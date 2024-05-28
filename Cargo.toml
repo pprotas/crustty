@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 glium = "0.32.0"
-rusttype = "0.9.3"
+glutin = "0.29.1"
+rusttype ={ version = "0.9.3", features = ["gpu_cache"] }
