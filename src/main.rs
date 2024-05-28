@@ -1,16 +1,12 @@
-use glium::Surface;
-use glium::{implement_vertex, program, uniform, Display};
-use glutin::event_loop::EventLoop;
-use glutin::window::WindowBuilder;
-use glutin::ContextBuilder;
+use glium::{implement_vertex, program, uniform, Display, Surface};
 use glutin::{
     event::{Event, WindowEvent},
-    event_loop::ControlFlow,
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+    ContextBuilder,
 };
-use rusttype::gpu_cache::Cache;
-use rusttype::{point, vector, Font, PositionedGlyph, Rect, Scale};
-use std::borrow::Cow;
-use std::error::Error;
+use rusttype::{gpu_cache::Cache, point, vector, Font, PositionedGlyph, Rect, Scale};
+use std::{borrow::Cow, error::Error};
 
 fn layout_text<'a>(
     font: &Font<'a>,
