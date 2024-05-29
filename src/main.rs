@@ -10,13 +10,10 @@ use nix::sys::{stat::Mode, wait::*};
 use nix::unistd::*;
 use nix::{fcntl::open, pty::*};
 use rusttype::{gpu_cache::Cache, point, vector, Font, PositionedGlyph, Rect, Scale};
-use std::os::unix::io::AsRawFd;
-use std::process::Command;
-use std::{borrow::Cow, error::Error};
-use std::{
-    io::{self, Write},
-    os::unix::process::CommandExt,
-};
+use std::os::unix::process::CommandExt;
+use std::{borrow::Cow, error::Error, thread};
+use std::{os::unix::io::AsRawFd, sync::Arc};
+use std::{process::Command, sync::Mutex};
 
 fn layout_text<'a>(
     font: &Font<'a>,
@@ -90,7 +87,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Rust is smart enough to tell that .into() should return a String because of the type
     // annotation.
     // &str implements the Into<String> trait, that's why all of this is possible.
-    let text: String = "Hello, World!".into();
+    // TODO: Outdated
+    let text = Arc::new(Mutex::new(String::new()));
 
     // Access the window's scale factor, this is used to have everything scaled correctly on
     // different screen DPIs
@@ -196,42 +194,49 @@ fn main() -> Result<(), Box<dyn Error>> {
     let slave_name = ptsname_r(&master)?;
     let slave_fd = open(&*slave_name, OFlag::O_RDWR, Mode::empty())?;
 
-    match unsafe { fork()? } {
-        ForkResult::Parent { child } => {
-            close(slave_fd)?;
+    let text_clone = Arc::clone(&text);
 
-            let master_fd = master.as_raw_fd();
+    thread::spawn(move || {
+        let mut buffer = [0u8; 1024];
+        let master_fd = master.as_raw_fd();
 
-            let mut buffer = [0u8; 1024];
-            loop {
-                match read(master_fd, &mut buffer) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        io::stdout().write_all(&buffer[..n])?;
-                        break;
-                    }
-                    Err(err) => {
-                        eprintln!("Error reading from PTY: {}", err);
-                        break;
+        match unsafe { fork().unwrap() } {
+            ForkResult::Parent { child } => {
+                close(slave_fd).unwrap();
+
+                loop {
+                    match read(master_fd, &mut buffer) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let mut text = text_clone.lock().unwrap();
+                            text.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                        }
+                        Err(err) => {
+                            eprintln!("Error reading from PTY: {}", err);
+                            break;
+                        }
                     }
                 }
+
+                waitpid(child, None).unwrap();
             }
+            ForkResult::Child => {
+                close(master_fd).unwrap();
 
-            waitpid(child, None)?;
+                dup2(slave_fd, 0).unwrap();
+                dup2(slave_fd, 1).unwrap();
+                dup2(slave_fd, 2).unwrap();
+
+                Command::new("/bin/zsh")
+                    .arg("-c")
+                    .arg("ping www.google.com")
+                    .exec();
+            }
         }
-        ForkResult::Child => {
-            close(master.as_raw_fd())?;
-
-            dup2(slave_fd, 0)?;
-            dup2(slave_fd, 1)?;
-            dup2(slave_fd, 2)?;
-
-            Command::new("/bin/sh").exec();
-        }
-    }
+    });
 
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
+        *control_flow = ControlFlow::Poll;
 
         match event {
             Event::WindowEvent { event, .. } => match event {
@@ -242,6 +247,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let scale = display.gl_window().window().scale_factor() as f32;
                 let (width, _): (u32, _) = display.gl_window().window().inner_size().into();
 
+                let text = text.lock().unwrap().clone();
                 let glyphs = layout_text(&font, Scale::uniform(24.0 * scale), width, &text);
                 for glyph in &glyphs {
                     cache.queue_glyph(0, glyph.clone());
