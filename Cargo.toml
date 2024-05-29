@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 glium = "0.32.0"
 glutin = "0.29.1"
+nix = "0.23.0"
 rusttype ={ version = "0.9.3", features = ["gpu_cache"] }

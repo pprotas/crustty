@@ -5,8 +5,18 @@ use glutin::{
     window::WindowBuilder,
     ContextBuilder,
 };
+use nix::fcntl::OFlag;
+use nix::sys::{stat::Mode, wait::*};
+use nix::unistd::*;
+use nix::{fcntl::open, pty::*};
 use rusttype::{gpu_cache::Cache, point, vector, Font, PositionedGlyph, Rect, Scale};
+use std::os::unix::io::AsRawFd;
+use std::process::Command;
 use std::{borrow::Cow, error::Error};
+use std::{
+    io::{self, Write},
+    os::unix::process::CommandExt,
+};
 
 fn layout_text<'a>(
     font: &Font<'a>,
@@ -177,6 +187,48 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Implement the necessary traits and functions into the Vertex struct, so it can be used in
     // OpenGL
     implement_vertex!(Vertex, position, tex_coords);
+
+    // Interact with shell
+    let master = posix_openpt(OFlag::O_RDWR)?;
+    grantpt(&master)?;
+    unlockpt(&master)?;
+
+    let slave_name = ptsname_r(&master)?;
+    let slave_fd = open(&*slave_name, OFlag::O_RDWR, Mode::empty())?;
+
+    match unsafe { fork()? } {
+        ForkResult::Parent { child } => {
+            close(slave_fd)?;
+
+            let master_fd = master.as_raw_fd();
+
+            let mut buffer = [0u8; 1024];
+            loop {
+                match read(master_fd, &mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        io::stdout().write_all(&buffer[..n])?;
+                        break;
+                    }
+                    Err(err) => {
+                        eprintln!("Error reading from PTY: {}", err);
+                        break;
+                    }
+                }
+            }
+
+            waitpid(child, None)?;
+        }
+        ForkResult::Child => {
+            close(master.as_raw_fd())?;
+
+            dup2(slave_fd, 0)?;
+            dup2(slave_fd, 1)?;
+            dup2(slave_fd, 2)?;
+
+            Command::new("/bin/sh").exec();
+        }
+    }
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
