@@ -1,11 +1,13 @@
 use nix::{
     fcntl::{open, OFlag},
+    libc::write,
     pty::*,
     sys::{stat::Mode, wait::*},
     unistd::*,
 };
 use std::{
     error::Error,
+    ffi::c_void,
     os::unix::{io::AsRawFd, process::CommandExt},
     process::Command,
     sync::{Arc, Mutex},
@@ -31,6 +33,9 @@ pub fn spawn_shell(text: &Arc<Mutex<String>>) -> Result<(), Box<dyn Error>> {
             ForkResult::Parent { child } => {
                 close(slave_fd).unwrap();
 
+                let command = "echo hello\n".as_bytes();
+                unsafe { write(master_fd, command.as_ptr() as *const c_void, command.len()) };
+
                 loop {
                     match read(master_fd, &mut buffer) {
                         Ok(0) => break,
@@ -54,10 +59,7 @@ pub fn spawn_shell(text: &Arc<Mutex<String>>) -> Result<(), Box<dyn Error>> {
                 dup2(slave_fd, 1).unwrap();
                 dup2(slave_fd, 2).unwrap();
 
-                Command::new("/bin/zsh")
-                    .arg("-c")
-                    .arg("ping www.google.com")
-                    .exec();
+                Command::new("/bin/sh").exec();
             }
         }
     });

@@ -188,24 +188,23 @@ pub fn render(text: Arc<Mutex<String>>) {
                     for glyph in &glyphs {
                         cache.queue_glyph(0, glyph.clone());
                     }
-                    cache
-                        .cache_queued(|rect, data| {
-                            cache_tex.main_level().write(
+                    cache.cache_queued(|rect, data| {
+                        cache_tex.main_level().write(
                             glium::Rect {
-                                    left: rect.min.x,
-                                    bottom: rect.min.y,
-                                    width: rect.width(),
-                                    height: rect.height(),
-                                },
-                            glium::texture::RawImage2d {
-                                    data: Cow::Borrowed(data),
-                                    width: rect.width(),
-                                    height: rect.height(),
-                                    format: glium::texture::ClientFormat::U8,
-                                },
-                                );
-                        })
-                                .unwrap();
+                                left: rect.min.x,
+                                bottom: rect.min.y,
+                                width: rect.width(),
+                                height: rect.height(),
+                            },
+                        glium::texture::RawImage2d {
+                                data: Cow::Borrowed(data),
+                                width: rect.width(),
+                                height: rect.height(),
+                                format: glium::texture::ClientFormat::U8,
+                            },
+                        );
+                    })
+                    .unwrap();
 
                     let uniforms = uniform! {tex: cache_tex.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest)};
 
